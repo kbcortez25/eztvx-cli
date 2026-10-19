@@ -81,7 +81,7 @@ def build_request_url(
     url: str, limit: int, page: int, imdb_id: Optional[str]
 ) -> str:
     """Add supported EZTV API parameters without discarding existing query values."""
-    if not imdb_id and page == 1 and url != DEFAULT_EZTV_API_URL:
+    if not imdb_id and page == 1 and not is_eztv_api_url(url):
         return url
 
     parsed = urllib.parse.urlsplit(url)
@@ -120,8 +120,11 @@ def extract_magnet(item: ET.Element) -> str:
             if value.startswith("magnet:?"):
                 return html.unescape(value)
 
-        if child.text:
-            magnet = extract_magnet_from_text(child.text)
+        # The item's own tail belongs to its parent, outside this feed entry.
+        for text in (child.text, child.tail if child is not item else None):
+            if not text:
+                continue
+            magnet = extract_magnet_from_text(text)
             if magnet:
                 return magnet
 
@@ -158,6 +161,8 @@ def parse_feed(feed_xml: bytes) -> list[FeedItem]:
 
 def parse_eztv_response(response_json: bytes) -> list[FeedItem]:
     payload = json.loads(response_json)
+    if not isinstance(payload, dict):
+        raise ValueError("EZTV response is not an object")
     torrents = payload.get("torrents", [])
     if not isinstance(torrents, list):
         raise ValueError("EZTV response has an invalid 'torrents' field")
@@ -177,7 +182,7 @@ def parse_eztv_response(response_json: bytes) -> list[FeedItem]:
                 published = dt.datetime.fromtimestamp(
                     timestamp, tz=dt.timezone.utc
                 ).strftime("%Y-%m-%d %H:%M UTC")
-            except (TypeError, ValueError, OSError):
+            except (TypeError, ValueError, OverflowError, OSError):
                 pass
 
         items.append(
