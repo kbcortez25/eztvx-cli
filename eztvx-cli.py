@@ -85,11 +85,17 @@ def build_request_url(
         return url
 
     parsed = urllib.parse.urlsplit(url)
-    query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
-    query["limit"] = str(limit)
-    query["page"] = str(page)
+    query = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(
+            parsed.query, keep_blank_values=True
+        )
+        if key not in {"limit", "page"}
+        and not (imdb_id and key == "imdb_id")
+    ]
+    query.extend((("limit", str(limit)), ("page", str(page))))
     if imdb_id:
-        query["imdb_id"] = imdb_id
+        query.append(("imdb_id", imdb_id))
     return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
 
 
@@ -443,6 +449,13 @@ def bounded_int(minimum: int, maximum: int):
     return parse
 
 
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="List EZTV API or RSS/Atom items and open or save magnet links.",
@@ -531,7 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--timeout",
-        type=int,
+        type=positive_int,
         default=DEFAULT_TIMEOUT_SECONDS,
         help=f"Network timeout in seconds (default: {DEFAULT_TIMEOUT_SECONDS}).",
     )
@@ -636,7 +649,14 @@ def main() -> int:
                 open_magnets(target_items, use_color)
 
         if args.save:
-            save_magnets(target_items, args.save, use_color)
+            try:
+                save_magnets(target_items, args.save, use_color)
+            except OSError as exc:
+                print(
+                    color(f"Could not save magnets: {exc}", Colors.RED, use_color),
+                    file=sys.stderr,
+                )
+                return 1
 
         return 0
 

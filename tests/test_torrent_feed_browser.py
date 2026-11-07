@@ -50,6 +50,21 @@ class RequestURLTests(unittest.TestCase):
         url = "https://example.com/feed.xml?limit=1&page=3&key=a%26b"
         self.assertEqual(browser.build_request_url(url, 100, 1, None), url)
 
+    def test_api_urls_preserve_duplicate_unrelated_parameters(self):
+        url = "https://example.com/api/get-torrents?tag=a&tag=b&empty=&empty=two"
+        query = urllib.parse.parse_qs(
+            urllib.parse.urlsplit(browser.build_request_url(url, 5, 1, None)).query,
+            keep_blank_values=True,
+        )
+        self.assertEqual(query["tag"], ["a", "b"])
+        self.assertEqual(query["empty"], ["", "two"])
+
+    def test_timeout_must_be_positive(self):
+        for timeout in ("0", "-1"):
+            with self.subTest(timeout=timeout):
+                with self.assertRaises(SystemExit):
+                    browser.build_parser().parse_args(["--timeout", timeout])
+
 
 class FeedParsingTests(unittest.TestCase):
     def test_atom_magnet_after_inline_markup_is_preserved(self):
@@ -107,6 +122,23 @@ class APIResponseTests(unittest.TestCase):
                     browser.FeedItem(1, "Bad date", "magnet:?xt=urn:btih:BAD", ""),
                     browser.FeedItem(2, "Good date", "magnet:?xt=urn:btih:GOOD", "2023-11-14 22:13 UTC"),
                 ])
+
+    def test_cli_reports_save_errors_without_a_traceback(self):
+        errors = io.StringIO()
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["eztvx-cli.py", "--no-interactive", "--save", "/tmp/magnets.txt"],
+            ),
+            patch.object(browser, "load_and_print_items", return_value=[]),
+            patch.object(browser, "save_magnets", side_effect=OSError("disk full")),
+            contextlib.redirect_stderr(errors),
+        ):
+            status = browser.main()
+        self.assertEqual(status, 1)
+        self.assertIn("Could not save magnets: disk full", errors.getvalue())
+        self.assertNotIn("Traceback", errors.getvalue())
 
 
 class InteractiveSearchTests(unittest.TestCase):
