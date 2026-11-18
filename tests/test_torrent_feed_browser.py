@@ -67,6 +67,26 @@ class RequestURLTests(unittest.TestCase):
 
 
 class FeedParsingTests(unittest.TestCase):
+    def test_inline_markup_in_title_is_preserved(self):
+        feed = b'''<rss><channel><item>
+            <title>The <b>Last</b> of Us</title>
+            <link>magnet:?xt=urn:btih:EXAMPLE</link>
+        </item></channel></rss>'''
+        self.assertEqual(browser.parse_response(feed), [browser.FeedItem(
+            index=1, title="The Last of Us", published="",
+            magnet="magnet:?xt=urn:btih:EXAMPLE",
+        )])
+
+    def test_trailing_sentence_punctuation_is_not_in_magnet(self):
+        feed = b'''<rss><channel><item>
+            <title>Example</title>
+            <description>Download magnet:?xt=urn:btih:EXAMPLE).</description>
+        </item></channel></rss>'''
+        self.assertEqual(browser.parse_response(feed), [browser.FeedItem(
+            index=1, title="Example", published="",
+            magnet="magnet:?xt=urn:btih:EXAMPLE",
+        )])
+
     def test_atom_magnet_after_inline_markup_is_preserved(self):
         feed = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry>
             <title>Example</title><updated>2026-10-19</updated>
@@ -122,6 +142,16 @@ class APIResponseTests(unittest.TestCase):
                     browser.FeedItem(1, "Bad date", "magnet:?xt=urn:btih:BAD", ""),
                     browser.FeedItem(2, "Good date", "magnet:?xt=urn:btih:GOOD", "2023-11-14 22:13 UTC"),
                 ])
+
+    def test_epoch_timestamp_zero_is_preserved(self):
+        payload = json.dumps({"torrents": [{
+            "title": "Epoch",
+            "magnet_url": "magnet:?xt=urn:btih:EPOCH",
+            "date_released_unix": 0,
+        }]}).encode()
+        self.assertEqual(browser.parse_response(payload), [browser.FeedItem(
+            1, "Epoch", "magnet:?xt=urn:btih:EPOCH", "1970-01-01 00:00 UTC",
+        )])
 
     def test_cli_reports_save_errors_without_a_traceback(self):
         errors = io.StringIO()

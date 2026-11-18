@@ -25,7 +25,7 @@ from typing import Iterable, Optional
 
 DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_PROBE_WORKERS = 5
-USER_AGENT = "torrent-feed-browser/1.0"
+USER_AGENT = "torrent-feed-browser/1.1"
 DEFAULT_EZTV_API_URL = "https://eztvx.to/api/get-torrents"
 TVMAZE_SEARCH_URL = "https://api.tvmaze.com/search/shows"
 MAGNET_PATTERN = re.compile(r"magnet:\?[^<>\s\"']+")
@@ -102,8 +102,10 @@ def build_request_url(
 def text_from(element: ET.Element, names: Iterable[str]) -> str:
     for name in names:
         found = find_child(element, name)
-        if found is not None and found.text:
-            return html.unescape(found.text.strip())
+        if found is not None:
+            value = "".join(found.itertext()).strip()
+            if value:
+                return html.unescape(value)
     return ""
 
 
@@ -116,7 +118,16 @@ def find_child(element: ET.Element, local_name: str) -> Optional[ET.Element]:
 
 def extract_magnet_from_text(text: str) -> str:
     match = MAGNET_PATTERN.search(text)
-    return html.unescape(match.group(0)) if match else ""
+    if not match:
+        return ""
+    magnet = html.unescape(match.group(0)).rstrip(".,;:!?")
+    matching_openers = {")": "(", "]": "[", "}": "{"}
+    while magnet and magnet[-1] in matching_openers:
+        closer = magnet[-1]
+        if magnet.count(matching_openers[closer]) >= magnet.count(closer):
+            break
+        magnet = magnet[:-1]
+    return magnet
 
 
 def extract_magnet(item: ET.Element) -> str:
@@ -182,7 +193,7 @@ def parse_eztv_response(response_json: bytes) -> list[FeedItem]:
             continue
 
         published = str(torrent.get("date_released") or "")
-        if not published and torrent.get("date_released_unix"):
+        if not published and torrent.get("date_released_unix") is not None:
             try:
                 timestamp = int(torrent["date_released_unix"])
                 published = dt.datetime.fromtimestamp(
